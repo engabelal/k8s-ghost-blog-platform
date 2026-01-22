@@ -39,7 +39,22 @@
 
 ## 🌟 Overview
 
-This project deploys a **production-grade Ghost blogging platform** on Kubernetes with enterprise-level security and reliability features. It demonstrates best practices for:
+This project deploys a **production-grade Ghost blogging platform** on Kubernetes with enterprise-level security and reliability features.
+
+### ❓ What is Ghost?
+
+[Ghost](https://ghost.org/) is a modern, open-source **headless CMS** and newsletter platform built on **Node.js**. Unlike legacy platforms like WordPress, Ghost is:
+
+*   🚀 **High Performance:** Built for speed with a modern technology stack.
+*   ✍️ **Content-Focused:** Offers a distraction-free, rich-text/markdown writing experience.
+*   📧 **Membership Native:** Built-in email newsletters and subscription management.
+*   🔒 **Secure:** Lean codebase with fewer vulnerabilities than plugin-heavy alternatives.
+
+---
+
+### Project Features
+
+It demonstrates best practices for:
 
 - **Stateful workloads** (MySQL with StatefulSet + PVC)
 - **Secret management** (Bitnami Sealed Secrets)
@@ -117,6 +132,11 @@ flowchart TB
                 MySQLPVC[(💾 MySQL Data PVC\n10Gi)]
             end
 
+            subgraph Backup Layer
+                BackupCron[⏱️ Backup CronJob\nDaily @ 02:00]
+                BackupPVC[(📦 Backup PVC\n5Gi)]
+            end
+
             subgraph Security
                 SealedSecret[🔒 Sealed Secrets\nEncrypted Credentials]
             end
@@ -131,14 +151,20 @@ flowchart TB
     GhostDep -->|mysql-0.mysql.blog-ghost.svc| MySQLSvc
     MySQLSvc --> MySQLSS
     MySQLSS --> MySQLPVC
+
+    BackupCron -->|mysqldump| MySQLSvc
+    BackupCron -->|Writes .sql| BackupPVC
+
     SealedSecret -.->|Decrypted at runtime| GhostDep
     SealedSecret -.->|Decrypted at runtime| MySQLSS
+    SealedSecret -.->|Decrypted at runtime| BackupCron
 
     style Traefik fill:#24A1C1,color:#fff
     style GhostDep fill:#212121,color:#fff
     style MySQLSS fill:#4479A1,color:#fff
     style SealedSecret fill:#FF6B6B,color:#fff
     style CertManager fill:#326CE5,color:#fff
+    style BackupCron fill:#2ea44f,color:#fff
 ```
 
 ---
