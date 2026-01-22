@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  namespace: blog-ghost
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      terminationGracePeriodSeconds: 30 # 30 seconds to allow for proper shutdown
+      containers:
+        - name: mysql
+          image: mysql:8.0.44 # recommended for Ghost
+          ports:
+            - name: mysql
+              containerPort: 3306 # MySQL pod port
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ghost-secrets
+                  key: mysql-root-password
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: ghost-secrets
+                  key: mysql-database
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ghost-secrets
+                  key: mysql-user
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ghost-secrets
+                  key: mysql-password
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+          readinessProbe:
+            exec:
+              command: ["sh","-c","mysqladmin ping -uroot -p\"$MYSQL_ROOT_PASSWORD\" --silent"]
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh","-c","mysqladmin ping -uroot -p\"$MYSQL_ROOT_PASSWORD\" --silent"]
+            initialDelaySeconds: 45
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+  volumeClaimTemplates:
+    - metadata:
+        name: mysql-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path # get from `kubectl get sc`
+        resources:
+          requests:
+            storage: 10Gi
