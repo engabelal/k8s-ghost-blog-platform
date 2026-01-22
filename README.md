@@ -14,7 +14,7 @@
 
 > 🖥️ **Not using managed Kubernetes!** This project runs on a **self-hosted K8s cluster** provisioned on my own VPS infrastructure, demonstrating full control over the entire stack from infrastructure to application.
 
-[Live Demo](https://kblog.cloudycode.dev) • [Architecture](#architecture) • [Quick Start](#quick-start) • [Security Features](#security-features)
+[Live Demo](https://kblog.cloudycode.dev) • [Architecture](#architecture) • [Design Decisions](#-design-decisions) • [Day 2 Ops](#%EF%B8%8F-day-2-operations)
 
 </div>
 
@@ -25,11 +25,12 @@
 - [Overview](#overview)
 - [Infrastructure](#infrastructure)
 - [Architecture](#architecture)
+- [Design Decisions](#-design-decisions)
 - [Features](#features)
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Security Features](#security-features)
+- [Day 2 Operations](#%EF%B8%8F-day-2-operations)
+- [Troubleshooting](#-troubleshooting)
 - [File Structure](#file-structure)
 - [Screenshots](#screenshots)
 
@@ -65,6 +66,20 @@ This demonstrates hands-on experience with:
 - Networking and ingress configuration
 - TLS/SSL certificate automation
 - Infrastructure as Code practices
+
+---
+
+## 🛠️ Tech Stack
+
+| Component | Version | Description |
+|-----------|---------|-------------|
+| **Ghost** | `6.x` (Alpine) | Core blogging platform (Node.js based) |
+| **MySQL** | `8.0` | Relational database backend |
+| **Kubernetes** | `v1.28+` | Container orchestration platform |
+| **Traefik** | `v2.10+` | Ingress Controller & Edge Router |
+| **Cert-Manager** | `v1.16+` | Cloud-native X.509 certificate management |
+| **Sealed Secrets** | `v0.24+` | Encrypted secrets management (Bitnami) |
+| **BusyBox** | `1.36` | Init containers utilities |
 
 ---
 
@@ -124,6 +139,39 @@ flowchart TB
     style SealedSecret fill:#FF6B6B,color:#fff
     style CertManager fill:#326CE5,color:#fff
 ```
+
+---
+
+## 🧐 Design Decisions
+
+<details>
+<summary><b>Why StatefulSet for MySQL?</b></summary>
+
+Unlike Deployments, `StatefulSet` maintains a sticky identity for each pod (e.g., `mysql-0`). This is crucial for databases to ensure consistent network identity and stable persistent storage binding across restarts.
+</details>
+
+<details>
+<summary><b>Why Headless Service?</b></summary>
+
+A Headless Service (`ClusterIP: None`) is used for MySQL to allow direct DNS resolution of the pod IP (`mysql-0.mysql.blog-ghost.svc`). This bypasses kube-proxy load balancing, which is preferred for stateful applications where the client (Ghost) needs to connect to a specific instance (Primary).
+</details>
+
+<details>
+<summary><b>Why Sealed Secrets?</b></summary>
+
+Standard Kubernetes Secrets are base64-encoded, not encrypted. Committing them to Git is a security risk. **Bitnami Sealed Secrets** uses asymmetric encryption:
+1. **Public Key:** Used by developers to seal secrets (safe to share).
+2. **Private Key:** Kept only inside the cluster controller to decrypt secrets.
+This allows for a full **GitOps** workflow without exposing credentials.
+</details>
+
+<details>
+<summary><b>Why Init Containers?</b></summary>
+
+Ghost runs as a non-root user (UID 1000). Kubernetes volumes often mount with root ownership. An `initContainer` is used to:
+1. `chown` the volume mount point to ensure the Ghost user can write constraints.
+2. Wait for the database to be reachable before starting the main application, preventing crash loops on startup.
+</details>
 
 ---
 
@@ -206,57 +254,44 @@ kubectl apply -f 09-traefik-middlewares.yaml
 kubectl apply -f 10-ghost-ingress.yaml
 ```
 
-### 5. Verify Deployment
+---
+
+## 🛠️ Day 2 Operations
+
+### 💾 Backup Strategy
+To backup the MySQL database:
 ```bash
-kubectl get pods -n blog-ghost -w
+# Exec into the pod and dump the database
+kubectl exec -it mysql-0 -n blog-ghost -- mysqldump -u root -p$MYSQL_ROOT_PASSWORD ghost > ghost-backup.sql
+
+# Backup the Ghost content (images/themes)
+kubectl cp blog-ghost/$(kubectl get pod -l app=ghost -n blog-ghost -o jsonpath='{.items[0].metadata.name}'):/var/lib/ghost/content ./ghost-content-backup
+```
+
+### 🔄 Updates
+To update Ghost to a newer version:
+```bash
+# Update the image in the deployment
+kubectl set image deployment/ghost ghost=ghost:5.x-alpine -n blog-ghost
+
+# Monitor the rollout
+kubectl rollout status deployment/ghost -n blog-ghost
 ```
 
 ---
 
-## ⚙️ Configuration
+## 🔧 Troubleshooting
 
-### Environment Variables (Ghost)
-
-| Variable | Description |
-|----------|-------------|
-| `url` | Public URL of your Ghost blog |
-| `database__client` | Database client (`mysql`) |
-| `database__connection__host` | MySQL headless service DNS |
-| `admin__email` | Admin email for Ghost |
-
-### Resource Limits
-
-| Component | CPU Request | CPU Limit | Memory Request | Memory Limit |
-|-----------|-------------|-----------|----------------|--------------|
-| Ghost | 100m | 1000m | 256Mi | 1Gi |
-| MySQL | 100m | 1000m | 256Mi | 1Gi |
+| Issue | Possible Cause | Solution |
+|-------|----------------|----------|
+| **Pod Status: Pending** | PVC cannot be bound | Check `kubectl get pvc` and ensure StorageClass exists and has capacity. |
+| **CrashLoopBackOff (MySQL)** | Permission issues or memory limit | Check logs: `kubectl logs mysql-0`. Ensure data dir permissions are correct. |
+| **502 Bad Gateway** | Ghost is not ready or reachable | Check service endpoints: `kubectl get endpoints ghost`. Verify Readiness Probe. |
+| **SSL Certificate Error** | cert-manager failed to issue | Check order status: `kubectl get challenges -A`. Ensure DNS records point to Ingress IP. |
 
 ---
 
-## 🔐 Security Features
-
-### Sealed Secrets
-All sensitive data (passwords, credentials) are encrypted using Bitnami Sealed Secrets. The encrypted values can be safely committed to Git, as only the cluster's Sealed Secrets controller can decrypt them.
-
-### HTTPS & TLS
-- Automatic certificate provisioning via cert-manager
-- HTTP → HTTPS redirect middleware
-- HSTS with preload enabled
-
-### Security Headers (Traefik Middleware)
-```yaml
-stsSeconds: 31536000          # 1 year HSTS
-stsIncludeSubdomains: true
-stsPreload: true
-contentTypeNosniff: true      # Prevent MIME sniffing
-frameDeny: true               # Clickjacking protection
-browserXssFilter: true        # XSS protection
-referrerPolicy: "no-referrer" # Privacy
-```
-
----
-
-## 📁 File Structure
+## 📂 File Structure
 
 ```
 k8s-ghost-blog-platform/
@@ -299,5 +334,9 @@ This project is open source and available under the [MIT License](LICENSE).
 <div align="center">
 
 **Built with ❤️ by [Ahmed Belal](https://github.com/engabelal)**
+
+<a href="https://github.com/engabelal" target="_blank">
+  <img src="https://img.shields.io/badge/GitHub-Follow%20Me-181717?style=social&logo=github" alt="Follow on GitHub" />
+</a>
 
 </div>
