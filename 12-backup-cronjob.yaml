@@ -1,0 +1,53 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mysql-backup
+  namespace: blog-ghost
+spec:
+  schedule: "0 2 * * *" # Daily at 2:00 AM
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: mysql:8.0.44
+              env:
+                - name: MYSQL_PWD
+                  valueFrom:
+                    secretKeyRef:
+                      name: ghost-secrets
+                      key: mysql-password
+              command:
+                - sh
+                - -c
+                - |
+                  set -e
+
+                  BACKUP_DIR=/backups/daily
+                  mkdir -p ${BACKUP_DIR}
+
+                  TS=$(date +%F_%H-%M-%S)
+                  FILE=${BACKUP_DIR}/ghost_${TS}.sql
+
+                  echo "Starting backup to ${FILE}..."
+
+                  mysqldump \
+                    -h mysql-0.mysql.blog-ghost.svc.cluster.local \
+                    -u ghost \
+                    ghost > ${FILE}
+
+                  # Retention: Delete backups older than 7 days
+                  find ${BACKUP_DIR} -type f -mtime +7 -delete
+
+                  echo "Backup completed: ${FILE}"
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: mysql-backups

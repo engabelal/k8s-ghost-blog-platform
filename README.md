@@ -8,6 +8,7 @@
 [![Traefik](https://img.shields.io/badge/Traefik-24A1C1?style=for-the-badge&logo=traefikproxy&logoColor=white)](https://traefik.io/)
 [![Cert-Manager](https://img.shields.io/badge/Cert--Manager-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)](https://cert-manager.io/)
 [![Sealed Secrets](https://img.shields.io/badge/Sealed%20Secrets-FF6B6B?style=for-the-badge&logo=bitnami&logoColor=white)](https://sealed-secrets.netlify.app/)
+[![Disaster Recovery](https://img.shields.io/badge/Disaster%20Recovery-Automated-2ea44f?style=for-the-badge&logo=githubactions&logoColor=white)](#-day-2-operations)
 [![Self-Hosted](https://img.shields.io/badge/Self--Hosted_VPS-000000?style=for-the-badge&logo=serverfault&logoColor=white)](#infrastructure)
 
 **A production-ready, secure, and scalable Ghost blogging platform deployed on a self-hosted Kubernetes cluster.**
@@ -187,6 +188,7 @@ Ghost runs as a non-root user (UID 1000). Kubernetes volumes often mount with ro
 | **⚡ Init Containers** | Volume permissions fix + MySQL readiness check |
 | **📊 Resources** | CPU/Memory requests and limits for predictable scheduling |
 | **🔄 Strategy** | Recreate strategy for safe single-replica PVC access |
+| **♻️ Backups** | Automated daily MySQL backups with 7-day retention policy |
 
 ---
 
@@ -252,6 +254,8 @@ kubectl apply -f 07-ghost-deployment.yaml
 kubectl apply -f 08-ghost-svc.yaml
 kubectl apply -f 09-traefik-middlewares.yaml
 kubectl apply -f 10-ghost-ingress.yaml
+kubectl apply -f 11-backup-pvc.yaml
+kubectl apply -f 12-backup-cronjob.yaml
 ```
 
 ---
@@ -259,13 +263,58 @@ kubectl apply -f 10-ghost-ingress.yaml
 ## 🛠️ Day 2 Operations
 
 ### 💾 Backup Strategy
-To backup the MySQL database:
-```bash
-# Exec into the pod and dump the database
-kubectl exec -it mysql-0 -n blog-ghost -- mysqldump -u root -p$MYSQL_ROOT_PASSWORD ghost > ghost-backup.sql
 
-# Backup the Ghost content (images/themes)
-kubectl cp blog-ghost/$(kubectl get pod -l app=ghost -n blog-ghost -o jsonpath='{.items[0].metadata.name}'):/var/lib/ghost/content ./ghost-content-backup
+MySQL is backed up daily using a Kubernetes CronJob and `mysqldump`. Backups are stored on a dedicated PersistentVolumeClaim and rotated automatically with a 7-day retention policy.
+
+This approach is intentionally simple and transparent to demonstrate operational fundamentals rather than relying on managed services.
+
+**Manual Backup Verification:**
+```bash
+# Check the backup logs
+kubectl logs -l job-name=<cronjob-pod-name> -n blog-ghost
+
+# Access the backup volume to verify files
+kubectl run backup-verify --rm -it --image=alpine --restart=Never -n blog-ghost --overrides='
+{
+  "spec": {
+    "containers": [
+      {
+        "name": "verify",
+        "image": "alpine",
+        "command": ["ls", "-lh", "/backups/daily"],
+        "volumeMounts": [{ "name": "backups", "mountPath": "/backups" }]
+      }
+    ],
+    "volumes": [{ "name": "backups", "persistentVolumeClaim": { "claimName": "mysql-backups" } }]
+  }
+}'
+```
+
+### ♻️ Restore Strategy
+
+To restore the database from a backup file:
+
+```bash
+# 1. Create a temporary pod to access the backups and database
+kubectl run restore-pod --rm -it --image=mysql:8.0.44 --restart=Never -n blog-ghost --overrides='
+{
+  "spec": {
+    "containers": [
+      {
+        "name": "restore",
+        "image": "mysql:8.0.44",
+        "stdin": true,
+        "tty": true,
+        "volumeMounts": [{ "name": "backups", "mountPath": "/backups" }]
+      }
+    ],
+    "volumes": [{ "name": "backups", "persistentVolumeClaim": { "claimName": "mysql-backups" } }]
+  }
+}' -- sh
+
+# 2. Inside the pod, run the restore command
+# Use the appropriate backup file from /backups/daily/
+mysql -h mysql-0.mysql.blog-ghost.svc.cluster.local -u ghost -p ghost < /backups/daily/ghost_YYYY-MM-DD_HH-MM-SS.sql
 ```
 
 ### 🔄 Updates
@@ -304,6 +353,8 @@ k8s-ghost-blog-platform/
 ├── 08-ghost-svc.yaml           # ClusterIP service for Ghost
 ├── 09-traefik-middlewares.yaml # HTTPS redirect + security headers
 ├── 10-ghost-ingress.yaml       # Ingress with TLS + middlewares
+├── 11-backup-pvc.yaml          # Dedicated storage for backups
+├── 12-backup-cronjob.yaml      # Daily backup job with retention
 └── README.md
 ```
 
