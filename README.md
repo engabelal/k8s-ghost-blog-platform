@@ -300,7 +300,8 @@ This approach is intentionally simple and transparent to demonstrate operational
 kubectl logs -l job-name=<cronjob-pod-name> -n blog-ghost
 
 # Access the backup volume to verify files
-kubectl run backup-verify --rm -it --image=alpine --restart=Never -n blog-ghost --overrides='
+# Access the backup volume to verify files
+kubectl run backup-verify -it --image=alpine --restart=Never -n blog-ghost --overrides='
 {
   "spec": {
     "containers": [
@@ -314,6 +315,9 @@ kubectl run backup-verify --rm -it --image=alpine --restart=Never -n blog-ghost 
     "volumes": [{ "name": "backups", "persistentVolumeClaim": { "claimName": "mysql-backups" } }]
   }
 }'
+
+# Clean up the pod when done
+kubectl delete pod backup-verify -n blog-ghost
 ```
 
 ### ♻️ Restore Strategy
@@ -322,7 +326,8 @@ To restore the database from a backup file:
 
 ```bash
 # 1. Create a temporary pod to access the backups and database
-kubectl run restore-pod --rm -it --image=mysql:8.0.44 --restart=Never -n blog-ghost --overrides='
+# 1. Create a temporary pod to access the backups and database
+kubectl run restore-pod -it --image=mysql:8.0.44 --restart=Never -n blog-ghost --overrides='
 {
   "spec": {
     "containers": [
@@ -341,6 +346,10 @@ kubectl run restore-pod --rm -it --image=mysql:8.0.44 --restart=Never -n blog-gh
 # 2. Inside the pod, run the restore command
 # Use the appropriate backup file from /backups/daily/
 mysql -h mysql-0.mysql.blog-ghost.svc.cluster.local -u ghost -p ghost < /backups/daily/ghost_YYYY-MM-DD_HH-MM-SS.sql
+
+# 3. Exit and clean up
+exit
+kubectl delete pod restore-pod -n blog-ghost
 ```
 
 ### 🔄 Updates
