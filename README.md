@@ -110,7 +110,7 @@ flowchart TB
     subgraph Kubernetes Cluster
         subgraph Ingress Layer
             Traefik[🔀 Traefik Ingress Controller]
-            CertManager[🔐 Cert-Manager\nLet's Encrypt TLS]
+            CertManager["🔐 Cert-Manager<br/>Let's Encrypt TLS"]
         end
 
         subgraph blog-ghost Namespace
@@ -122,23 +122,23 @@ flowchart TB
 
             subgraph Application Layer
                 GhostDep[👻 Ghost Deployment]
-                GhostSvc[Ghost Service\nClusterIP :80]
-                GhostPVC[(📁 Ghost Content PVC\n5Gi)]
+                GhostSvc["Ghost Service<br/>ClusterIP :80"]
+                GhostPVC[("(📁 Ghost Content PVC<br/>5Gi)")]
             end
 
             subgraph Database Layer
                 MySQLSS[🗄️ MySQL StatefulSet]
-                MySQLSvc[MySQL Headless Service\n:3306]
-                MySQLPVC[(💾 MySQL Data PVC\n10Gi)]
+                MySQLSvc["MySQL Headless Service<br/>:3306"]
+                MySQLPVC[("(💾 MySQL Data PVC<br/>10Gi)")]
             end
 
             subgraph Backup Layer
-                BackupCron[⏱️ Backup CronJob\nDaily @ 02:00]
-                BackupPVC[(📦 Backup PVC\n5Gi)]
+                BackupCron["⏱️ Backup CronJob<br/>Daily @ 02:00"]
+                BackupPVC[("(📦 Backup PVC<br/>5Gi)")]
             end
 
             subgraph Security
-                SealedSecret[🔒 Sealed Secrets\nEncrypted Credentials]
+                SealedSecret["🔒 Sealed Secrets<br/>Encrypted Credentials"]
             end
         end
     end
